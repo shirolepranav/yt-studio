@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YT Studio</title>
+<style>
+  :root {
+    --bg: #f6f5f2; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6a66;
+    --ai: #ffffff; --me: #1f5f8b; --me-text: #fff; --line: #e3e1dc;
+    --chip: #eef3f7; --chip-text: #1f5f8b; --accent: #c2410c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141413; --panel: #1d1d1b; --text: #ecebe7; --muted: #9a9892;
+      --ai: #232321; --me: #2f6f9b; --me-text: #fff; --line: #2e2e2b;
+      --chip: #22303a; --chip-text: #9fd0f2; --accent: #f97316;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+         height: 100vh; display: flex; flex-direction: column; }
+  header { display: flex; gap: 8px; align-items: center; padding: 10px 16px;
+           background: var(--panel); border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 16px; margin: 0; }
+  button { font: inherit; cursor: pointer; border: 1px solid var(--line); border-radius: 8px;
+           padding: 6px 12px; background: var(--panel); color: var(--text); }
+  button:hover { border-color: var(--chip-text); }
+  #job { font-size: 13px; color: var(--accent); }
+  #channels { display: flex; gap: 4px; margin-right: auto; flex-wrap: wrap; }
+  #channels button { position: relative; }
+  #channels button.active { background: var(--chip); color: var(--chip-text); border-color: var(--chip-text); font-weight: 600; }
+  #channels button.unread::after { content: ""; position: absolute; top: 3px; right: 3px; width: 8px; height: 8px;
+                                   border-radius: 50%; background: var(--accent); }
+  @media (max-width: 700px) { header { flex-wrap: wrap; } }
+  #log { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: min(760px, 92%); padding: 10px 14px; border-radius: 12px; white-space: pre-wrap;
+         overflow-wrap: anywhere; background: var(--ai); border: 1px solid var(--line); }
+  .msg.user { align-self: flex-end; background: var(--me); color: var(--me-text); border: none; }
+  .msg pre { white-space: pre-wrap; background: var(--bg); padding: 8px; border-radius: 6px; margin: 6px 0; }
+  .msg code { background: var(--bg); padding: 0 4px; border-radius: 4px; }
+  .msg a { color: var(--chip-text); }
+  .msg img { display: block; max-width: 100%; width: 480px; border-radius: 8px; margin-top: 6px; cursor: zoom-in; }
+  .msg video { display: block; width: 720px; max-width: 100%; border-radius: 8px; margin-top: 6px; background: #000; }
+  .time { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .user .time { color: #ffffffaa; }
+  .buttons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; white-space: normal; }
+  .buttons button { background: var(--chip); color: var(--chip-text); border: none; }
+  form { display: flex; gap: 8px; padding: 12px 16px; background: var(--panel); border-top: 1px solid var(--line); }
+  textarea { flex: 1; resize: none; font: inherit; padding: 10px; border-radius: 8px; min-height: 44px;
+             max-height: 200px; border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+  #zoom { position: fixed; inset: 0; background: #000c; display: none; align-items: center;
+          justify-content: center; cursor: zoom-out; }
+  #zoom img { max-width: 95vw; max-height: 95vh; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎬 Studio</h1>
+  <nav id="channels" aria-label="Channels"></nav>
+  <span id="job"></span>
+  <button data-send="cmd:new">🎬 New video</button>
+  <button data-send="cmd:status">📊 Status</button>
+  <button data-send="cmd:stop">⏹ Stop</button>
+</header>
+<main id="log" aria-live="polite"></main>
+<form id="form">
+  <textarea id="text" placeholder="Message… (Enter to send, Shift+Enter for a new line)" aria-label="Message"></textarea>
+  <button type="submit">Send</button>
+</form>
+<div id="zoom"><img alt=""></div>
+<script>
+const log = document.getElementById("log");
+const text = document.getElementById("text");
+const zoom = document.getElementById("zoom");
+let bubbles = {};
+let next = 0;
+let channel = null;       // key of the channel on screen
+let seen = {};            // key -> message count last viewed, for unread dots
+try { channel = localStorage.getItem("channel"); seen = JSON.parse(localStorage.getItem("seen") || "{}"); } catch (e) {}
+const base = () => "/ch/" + channel;
+const media = url => url && url.startsWith("/runs/") ? base() + url : url;
+let stick = true;  // follow new messages unless you've scrolled up to read
+log.onscroll = () => { stick = log.scrollHeight - log.scrollTop - log.clientHeight < 80; };
+// Images and videos grow after they load; keep the bottom in view if we were there.
+log.addEventListener("load", () => { if (stick) log.scrollTop = log.scrollHeight; }, true);
+log.addEventListener("loadedmetadata", () => { if (stick) log.scrollTop = log.scrollHeight; }, true);
+
+function send(value) {
+  fetch(base() + "/send", { method: "POST", headers: { "Content-Type": "application/json" },
+                   body: JSON.stringify({ text: value }) }).then(poll);
+}
+
+function fill(el, m) {
+  el.innerHTML = "";
+  const body = document.createElement("div");
+  if (m.role === "user") body.textContent = m.text;
+  else body.innerHTML = m.html || "";  // escaped server-side by chat.escape()
+  el.appendChild(body);
+  if (m.image) {
+    const img = document.createElement("img");
+    img.src = media(m.image); img.alt = "thumbnail";
+    img.onclick = () => { zoom.firstElementChild.src = img.src; zoom.style.display = "flex"; };
+    el.appendChild(img);
+  }
+  if (m.video) {
+    const v = document.createElement("video");
+    v.src = media(m.video); v.controls = true; v.preload = "metadata";
+    el.appendChild(v);
+  }
+  if (m.file) {
+    const a = document.createElement("a");
+    a.href = media(m.file); a.target = "_blank"; a.textContent = "📄 " + m.name;
+    el.appendChild(a);
+  }
+  if (m.buttons) {
+    const row = document.createElement("div");
+    row.className = "buttons";
+    for (const line of m.buttons) for (const [label, code] of line) {
+      const b = document.createElement("button");
+      b.textContent = label; b.onclick = () => send(code);
+      row.appendChild(b);
+    }
+    el.appendChild(row);
+  }
+  const t = document.createElement("div");
+  t.className = "time";
+  t.textContent = new Date(m.ts * 1000).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" });
+  el.appendChild(t);
+}
+
+function render(m) {
+  if (m.edit && bubbles[m.edit]) return fill(bubbles[m.edit], { ...m, role: "ai" });
+  const el = document.createElement("div");
+  el.className = "msg " + (m.role === "user" ? "user" : "ai");
+  fill(el, m);
+  bubbles[m.id] = el;
+  log.appendChild(el);
+}
+
+let polling = false;  // a send() and the timer must not both fetch the same messages
+async function poll() {
+  if (polling) return;
+  polling = true;
+  try {
+    const state = await (await fetch("/channels")).json();
+    if (!state.channels.some(c => c.key === channel)) channel = state.channels[0] && state.channels[0].key;
+    drawChannels(state);
+    if (channel) {
+      const shown = channel, from = next;
+      const r = await (await fetch(`/ch/${shown}/messages?after=${from}`)).json();
+      // Drop a reply that is stale: the channel changed, or another poll already drew it.
+      if (shown === channel && from === next) {
+        r.messages.forEach(render);
+        next = r.next;
+        seen[channel] = next; save();
+        if (r.messages.some(m => m.role === "user")) stick = true;
+        if (stick) log.scrollTop = log.scrollHeight;
+      }
+    }
+  } catch (e) {
+    document.getElementById("job").textContent = "⚠️ studio not running";
+  }
+  polling = false;
+}
+
+function drawChannels(state) {
+  const nav = document.getElementById("channels");
+  nav.innerHTML = "";
+  for (const c of state.channels) {
+    const b = document.createElement("button");
+    b.textContent = `${c.emoji} ${c.name}`;
+    b.className = (c.key === channel ? "active" : "") + (c.key !== channel && c.count > (seen[c.key] || 0) ? " unread" : "");
+    b.onclick = () => switchTo(c.key);
+    nav.appendChild(b);
+  }
+  const run = state.running;
+  const minutes = run ? Math.floor((Date.now() / 1000 - run.started) / 60) : 0;
+  document.getElementById("job").textContent =
+    (run ? `⚙️ ${run.name} · ${run.intent} · ${minutes} min` : "") +
+    (state.queued.length ? ` · ${state.queued.length} queued` : "");
+}
+
+function switchTo(key) {
+  if (key === channel) return;
+  channel = key; save();
+  log.innerHTML = ""; bubbles = {}; next = 0; stick = true;
+  polling = false; poll();
+}
+
+function save() {
+  try { localStorage.setItem("channel", channel); localStorage.setItem("seen", JSON.stringify(seen)); } catch (e) {}
+}
+
+document.getElementById("form").onsubmit = e => {
+  e.preventDefault();
+  if (text.value.trim()) send(text.value);
+  text.value = "";
+};
+text.onkeydown = e => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); document.getElementById("form").requestSubmit(); }
+};
+document.querySelectorAll("[data-send]").forEach(b => b.onclick = () => send(b.dataset.send));
+zoom.onclick = () => zoom.style.display = "none";
+poll();
+setInterval(poll, 2000);
+</script>
+</body>
+</html>
