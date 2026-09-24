@@ -53,6 +53,26 @@
   #zoom { position: fixed; inset: 0; background: #000c; display: none; align-items: center;
           justify-content: center; cursor: zoom-out; }
   #zoom img { max-width: 95vw; max-height: 95vh; }
+  #footage { width: min(1100px, 96vw); max-height: 92vh; padding: 0; border: 1px solid var(--line);
+             border-radius: 12px; background: var(--panel); color: var(--text); }
+  #footage::backdrop { background: #0008; }
+  #footage header { position: sticky; top: 0; z-index: 1; }
+  #footage header span { margin-right: auto; color: var(--muted); font-size: 13px; }
+  .shot { display: grid; grid-template-columns: 70px 1fr 300px; gap: 12px; padding: 12px 16px;
+          border-bottom: 1px solid var(--line); }
+  @media (max-width: 800px) { .shot { grid-template-columns: 1fr; } }
+  .shot .at { font-size: 13px; color: var(--muted); white-space: pre-line; }
+  .shot .said { font-style: italic; }
+  .shot .why { font-size: 13px; color: var(--muted); margin-top: 4px; }
+  .shot video, .shot img { width: 100%; aspect-ratio: 16/9; object-fit: cover; border-radius: 6px; background: #000; }
+  .badge { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 10px;
+           margin-right: 6px; background: var(--chip); color: var(--chip-text); }
+  .badge.ai { background: #6d28d933; color: #a78bfa; }
+  .badge.archive { background: #15803d33; color: #4ade80; }
+  .swap { display: flex; gap: 6px; margin-top: 8px; }
+  .swap input { flex: 1; min-width: 0; font: inherit; font-size: 13px; padding: 5px 8px; border-radius: 6px;
+                border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+  .swap button { font-size: 13px; padding: 4px 10px; }
 </style>
 </head>
 <body>
@@ -70,6 +90,11 @@
   <button type="submit">Send</button>
 </form>
 <div id="zoom"><img alt=""></div>
+<dialog id="footage" aria-label="Footage">
+  <header><h1>🎞 Footage</h1><span>Swap a shot: describe what you want (optional), then pick new stock or an AI image.</span>
+    <button onclick="this.closest('dialog').close()">Close</button></header>
+  <div id="shots"></div>
+</dialog>
 <script>
 const log = document.getElementById("log");
 const text = document.getElementById("text");
@@ -114,6 +139,12 @@ function fill(el, m) {
     a.href = media(m.file); a.target = "_blank"; a.textContent = "📄 " + m.name;
     el.appendChild(a);
   }
+  if (m.footage) {
+    const b = document.createElement("button");
+    b.textContent = "🎞 Review footage"; b.onclick = () => openFootage(m.footage);
+    el.appendChild(b);
+    if (footage.open) openFootage(m.footage);  // a swap finished while the list was open
+  }
   if (m.buttons) {
     const row = document.createElement("div");
     row.className = "buttons";
@@ -137,6 +168,54 @@ function render(m) {
   fill(el, m);
   bubbles[m.id] = el;
   log.appendChild(el);
+}
+
+// The footage list: every shot against the script, from the channel's footage.json.
+const footage = document.getElementById("footage");
+const clock = t => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
+function tag(name, props = {}, ...kids) {
+  const el = Object.assign(document.createElement(name), props);
+  el.append(...kids);
+  return el;
+}
+async function openFootage(url) {
+  const rows = await (await fetch(media(url))).json();
+  const list = document.getElementById("shots");
+  const scroll = list.parentElement.scrollTop;
+  list.innerHTML = "";
+  for (const r of rows) {
+    const kind = { stock: "Stock", archive: "Archive", ai: "AI", data: "Chart / card" }[r.kind];
+    const text = tag("div", {}, tag("span", { className: "badge " + r.kind, textContent: kind }),
+                     tag("span", { className: "said", textContent: `“${r.said}”` }));
+    if (r.label) text.append(tag("div", { className: "why", textContent: r.label }));
+    const pics = tag("div");
+    for (const c of r.clips) {
+      pics.append(c.media === "video"
+        ? tag("video", { src: media(c.src) + "#t=0.5", controls: true, muted: true, preload: "metadata" })
+        : tag("img", { src: media(c.src), alt: "", loading: "lazy" }));
+      const why = [c.score != null ? `${c.score}/10` : "", c.why].filter(Boolean).join(" · ");
+      if (why) text.append(tag("div", { className: "why", textContent: "Why: " + why }));
+      if (c.credit || c.page) text.append(tag("div", { className: "why" },
+        c.page ? tag("a", { href: c.page, target: "_blank", rel: "noopener", textContent: c.credit || "source page" })
+               : c.credit));
+    }
+    const row = tag("div", { className: "shot" });
+    if (r.swappable) {
+      const hint = tag("input", { placeholder: r.kind === "ai" ? "Describe the new image…" : `Search, e.g. ${r.query || "lava at night"}`,
+                                  ariaLabel: `What shot ${r.id} should show` });
+      // The list stays open, so several swaps can queue; it reloads as each one lands.
+      const swap = to => { send(`swap:${r.id}:${to}` + (hint.value.trim() ? ":" + hint.value.trim() : ""));
+                           row.querySelectorAll("input, button").forEach(b => b.disabled = true);
+                           hint.value = ""; hint.placeholder = "⏳ Swapping… (queued jobs run one at a time)"; };
+      text.append(tag("div", { className: "swap" }, hint,
+        tag("button", { textContent: "🔎 New stock", onclick: () => swap("stock") }),
+        tag("button", { textContent: "✨ AI", onclick: () => swap("ai") })));
+    }
+    row.append(tag("div", { className: "at", textContent: `${clock(r.start)}\n#${r.id}` }), text, pics);
+    list.append(row);
+  }
+  if (!footage.open) footage.showModal();
+  list.parentElement.scrollTop = scroll;
 }
 
 let polling = false;  // a send() and the timer must not both fetch the same messages

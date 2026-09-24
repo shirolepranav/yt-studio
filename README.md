@@ -8,7 +8,13 @@ make app        # opens http://127.0.0.1:8765
 
 Pick a channel in the header and chat with it: start a video, pick a topic,
 edit the script, watch the finished video, change the title, thumbnail or pinned
-comment, then **Accept & upload**. Every channel keeps its own conversation; a
+comment, then **Accept & upload**.
+
+Before the render, the build stops and posts the **footage list**: every shot
+next to its line of script, marked stock, archive (NASA/Commons), AI, or
+chart/card, with the reason it was picked. Swap any shot for a fresh library
+search or an AI image, optionally saying what you want, then tap **Render**.
+Only the two-minute segments you changed are re-rendered. Every channel keeps its own conversation; a
 dot marks one with new messages.
 
 **One job runs at a time across all channels.** A second channel's build waits
