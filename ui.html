@@ -43,6 +43,7 @@
   .msg a { color: var(--chip-text); }
   .msg img { display: block; max-width: 100%; width: 480px; border-radius: 8px; margin-top: 6px; cursor: zoom-in; }
   .msg video { display: block; width: 720px; max-width: 100%; border-radius: 8px; margin-top: 6px; background: #000; }
+  .msg audio { display: block; width: 520px; max-width: 100%; margin-top: 6px; }
   .time { font-size: 11px; color: var(--muted); margin-top: 4px; }
   .user .time { color: #ffffffaa; }
   .buttons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; white-space: normal; }
@@ -133,6 +134,11 @@ function fill(el, m) {
     const v = document.createElement("video");
     v.src = media(m.video); v.controls = true; v.preload = "metadata";
     el.appendChild(v);
+  }
+  if (m.audio) {
+    const au = document.createElement("audio");
+    au.src = media(m.audio); au.controls = true; au.preload = "metadata";
+    el.appendChild(au);
   }
   if (m.file) {
     const a = document.createElement("a");

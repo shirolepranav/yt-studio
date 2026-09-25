@@ -7,7 +7,8 @@ make app        # opens http://127.0.0.1:8765
 ```
 
 Pick a channel in the header and chat with it: start a video, pick a topic,
-edit the script, watch the finished video, change the title, thumbnail or pinned
+edit the script, listen to the narration (if the channel stops there for it),
+watch the finished video, change the title, thumbnail or pinned
 comment, then **Accept & upload**.
 
 Before the render, the build stops and posts the **footage list**: every shot
